@@ -1,9 +1,9 @@
-"""LINE Messaging API で画像とキャプションを送信する"""
+"""LINE Messaging API で画像（複数）とキャプションを送信する"""
 import os
 import requests
 
 
-def send_line_image(image_url: str, caption: str) -> None:
+def send_line_panels(image_urls: list[str], caption: str) -> None:
     token   = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
     user_id = os.environ["LINE_USER_ID"]
 
@@ -11,20 +11,19 @@ def send_line_image(image_url: str, caption: str) -> None:
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-    body = {
-        "to": user_id,
-        "messages": [
-            {
-                "type": "image",
-                "originalContentUrl": image_url,
-                "previewImageUrl":    image_url,
-            },
-            {
-                "type": "text",
-                "text": caption,
-            },
-        ],
-    }
+
+    # 画像メッセージ（最大4枚）＋テキスト1件 = 最大5件（LINEの上限）
+    messages = [
+        {
+            "type": "image",
+            "originalContentUrl": url,
+            "previewImageUrl":    url,
+        }
+        for url in image_urls[:4]
+    ]
+    messages.append({"type": "text", "text": caption})
+
+    body = {"to": user_id, "messages": messages}
     resp = requests.post(
         "https://api.line.me/v2/bot/message/push",
         headers=headers,

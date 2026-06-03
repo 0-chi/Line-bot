@@ -1,4 +1,4 @@
-"""4コマ漫画画像を生成する (1080x1080px / Instagram正方形)"""
+"""パネルごとに個別画像を生成する (1080x1080px)"""
 import sys
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
@@ -7,15 +7,13 @@ import os
 sys.path.insert(0, str(Path(__file__).parent))
 from fetch_irasutoya import fetch as _fetch
 
-# ── キャンバス設定 ──────────────────────────────────────────
 CANVAS_W, CANVAS_H = 1080, 1080
-TITLE_H = 100
-PAD = 10
+TITLE_H  = 110
+TEXT_H   = 210
+PAD      = 12
 
-# ── カラーパレット ──────────────────────────────────────────
 BG_COLOR       = "#FFF8F0"
 PANEL_BG       = "#FFFFFF"
-PANEL_BORDER   = "#E0E0E0"
 TEXT_BOX_BG    = "#F0F7FF"
 TEXT_COLOR     = "#333333"
 PLACEHOLDER_BG = "#F0F0F0"
@@ -45,7 +43,6 @@ def _get_font(size: int) -> ImageFont.FreeTypeFont:
 
 
 def _wrap(text: str, font, max_w: int, draw: ImageDraw.ImageDraw) -> list[str]:
-    """日本語対応の文字単位折り返し"""
     lines, cur = [], ""
     for ch in text:
         if ch == "\n":
@@ -72,59 +69,17 @@ def _load_image(keyword: str, max_w: int, max_h: int) -> Image.Image:
             return img
         except Exception:
             pass
-    # プレースホルダー
     ph = Image.new("RGBA", (max_w, max_h), (0, 0, 0, 0))
     d = ImageDraw.Draw(ph)
     d.rounded_rectangle([0, 0, max_w - 1, max_h - 1], radius=10,
                          fill=PLACEHOLDER_BG, outline="#CCCCCC", width=1)
-    font = _get_font(16)
-    label = keyword[:10]
-    d.text((max_w // 2, max_h // 2), label, font=font,
-           fill=PLACEHOLDER_FG, anchor="mm", align="center")
+    d.text((max_w // 2, max_h // 2), keyword[:12], font=_get_font(18),
+           fill=PLACEHOLDER_FG, anchor="mm")
     return ph
 
 
-def _draw_panel(canvas: Image.Image, draw: ImageDraw.ImageDraw,
-                x: int, y: int, w: int, h: int, panel: dict) -> None:
-    # パネル背景
-    draw.rounded_rectangle([x, y, x + w, y + h], radius=12,
-                            fill=PANEL_BG, outline=PANEL_BORDER, width=2)
-
-    # キャラクター画像エリア (上60%)
-    img_h = int(h * 0.60)
-    char = _load_image(panel.get("image", "happy_person"), w - 20, img_h - 10)
-    paste_x = x + (w - char.width) // 2
-    paste_y = y + 5
-    if char.mode == "RGBA":
-        canvas.paste(char, (paste_x, paste_y), char)
-    else:
-        canvas.paste(char, (paste_x, paste_y))
-
-    # テキストエリア (下40%)
-    tx, ty = x + 8, y + img_h + 5
-    tw, th = w - 16, h - img_h - 10
-    draw.rounded_rectangle([tx, ty, tx + tw, ty + th], radius=8, fill=TEXT_BOX_BG)
-
-    font = _get_font(22)
-    lines = _wrap(panel.get("text", ""), font, tw - 16, draw)
-    lh = 27
-    total = len(lines) * lh
-    start_y = ty + max(6, (th - total) // 2)
-    for i, line in enumerate(lines):
-        draw.text((x + w // 2, start_y + i * lh), line,
-                  font=font, fill=TEXT_COLOR, anchor="mm")
-
-
-def compose(story: dict, episode_num: int, output_path: str | None = None) -> str:
-    """
-    story: stories.json の1要素
-    episode_num: 投稿通し番号
-    output_path: 保存先（省略時は output/episode_NNN.png）
-    """
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    if output_path is None:
-        output_path = str(OUTPUT_DIR / f"episode_{episode_num:03d}.png")
-
+def _compose_panel(story: dict, episode_num: int, panel: dict,
+                   panel_idx: int, total: int, output_path: str) -> None:
     canvas = Image.new("RGB", (CANVAS_W, CANVAS_H), BG_COLOR)
     draw   = ImageDraw.Draw(canvas)
 
@@ -133,48 +88,68 @@ def compose(story: dict, episode_num: int, output_path: str | None = None) -> st
     color = CATEGORY_COLOR.get(cat, "#2D6A4F")
     draw.rectangle([0, 0, CANVAS_W, TITLE_H], fill=color)
 
-    # カテゴリバッジ
     badge_font = _get_font(20)
-    draw.rounded_rectangle([12, 14, 78, 44], radius=8, fill="white")
-    draw.text((45, 29), cat, font=badge_font, fill=color, anchor="mm")
+    draw.rounded_rectangle([12, 16, 78, 44], radius=8, fill="white")
+    draw.text((45, 30), cat, font=badge_font, fill=color, anchor="mm")
 
-    # タイトル & サブタイトル
-    draw.text((CANVAS_W // 2, 36),
+    draw.text((CANVAS_W // 2, 38),
               "不動産あるある", font=_get_font(34), fill="white", anchor="mm")
-    draw.text((CANVAS_W // 2, 74),
-              f"#{episode_num:02d}「{story['title']}」",
+    draw.text((CANVAS_W // 2, 78),
+              f"#{episode_num:02d}「{story['title']}」{panel_idx}/{total}",
               font=_get_font(22), fill="#D8EED8", anchor="mm")
 
-    # ── パネル配置 ────────────────────────────────────────
-    panels = story["panels"][:4]
-    n      = len(panels)
-    cols   = 1 if n <= 2 else 2
-    rows   = (n + cols - 1) // cols
+    # ── イラストエリア ────────────────────────────────────
+    illust_y = TITLE_H + PAD
+    illust_h = CANVAS_H - TITLE_H - PAD * 3 - TEXT_H
+    illust_w = CANVAS_W - PAD * 2
 
-    area_x = PAD
-    area_y = TITLE_H + PAD
-    area_w = CANVAS_W - PAD * 2
-    area_h = CANVAS_H - TITLE_H - PAD * 2
+    img = _load_image(panel.get("image", ""), illust_w, illust_h)
+    paste_x = PAD + (illust_w - img.width) // 2
+    paste_y = illust_y + (illust_h - img.height) // 2
+    if img.mode == "RGBA":
+        canvas.paste(img, (paste_x, paste_y), img)
+    else:
+        canvas.paste(img, (paste_x, paste_y))
 
-    pw = (area_w - PAD * (cols - 1)) // cols
-    ph = (area_h - PAD * (rows - 1)) // rows
+    # ── テキストボックス ──────────────────────────────────
+    tx = PAD
+    ty = CANVAS_H - PAD - TEXT_H
+    tw = CANVAS_W - PAD * 2
+    draw.rounded_rectangle([tx, ty, tx + tw, ty + TEXT_H], radius=14, fill=TEXT_BOX_BG)
 
-    for i, panel in enumerate(panels):
-        col = i % cols
-        row = i // cols
-        px  = area_x + col * (pw + PAD)
-        py  = area_y + row * (ph + PAD)
-        _draw_panel(canvas, draw, px, py, pw, ph, panel)
+    font  = _get_font(42)
+    lines = _wrap(panel.get("text", ""), font, tw - 40, draw)
+    lh    = 54
+    total_h = len(lines) * lh
+    start_y = ty + max(14, (TEXT_H - total_h) // 2)
+    for i, line in enumerate(lines):
+        draw.text((CANVAS_W // 2, start_y + i * lh), line,
+                  font=font, fill=TEXT_COLOR, anchor="mm")
 
     canvas.save(output_path, "PNG")
-    return output_path
 
 
-# ── テスト実行 ────────────────────────────────────────────
+def compose(story: dict, episode_num: int, output_dir: str | None = None) -> list[str]:
+    """4枚の個別パネル画像を生成してパスのリストを返す"""
+    out_dir = Path(output_dir) if output_dir else OUTPUT_DIR
+    out_dir.mkdir(exist_ok=True)
+
+    panels = story["panels"][:4]
+    paths  = []
+    for i, panel in enumerate(panels, 1):
+        path = str(out_dir / f"episode_{episode_num:03d}_panel{i}.png")
+        print(f"  🎨 パネル {i}/{len(panels)}: {panel.get('image', '')[:20]}")
+        _compose_panel(story, episode_num, panel, i, len(panels), path)
+        paths.append(path)
+
+    return paths
+
+
 if __name__ == "__main__":
-    import json, sys
+    import json, sys as _sys
     stories = json.loads((ROOT / "content" / "stories.json").read_text(encoding="utf-8"))
-    idx = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+    idx = int(_sys.argv[1]) if len(_sys.argv) > 1 else 0
     story = stories[idx % len(stories)]
-    out = compose(story, idx + 1)
-    print(f"生成完了: {out}")
+    paths = compose(story, idx + 1)
+    for p in paths:
+        print(f"生成完了: {p}")
