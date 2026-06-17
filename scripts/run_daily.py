@@ -1,77 +1,56 @@
-"""毎日1本投稿するメインスクリプト"""
+"""不動産業界の最新ニュースを1件取得し、所感を添えてLINEに送信する"""
 import argparse
-import json
 import sys
-from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(Path(__file__).parent))
 
-from compose_image import compose
-from post_instagram import upload_to_imgbb
-from send_line import send_line_panels
-
-START_DATE = date(2026, 6, 3)
-
-HASHTAGS = (
-    "#不動産あるある #賃貸あるある #マイホームあるある\n"
-    "#不動産 #賃貸 #一人暮らし #マイホーム #住宅購入\n"
-    "#引っ越し #新生活 #あるある漫画"
-)
+from fetch_news import fetch_latest_unposted, mark_posted
+from generate_comment import generate_comment
+from send_line import send_line_text
 
 
-def build_caption(story: dict, episode_num: int) -> str:
-    return (
-        f"不動産あるある #{episode_num:02d}\n"
-        f"「{story['title']}」\n\n"
-        f"{HASHTAGS}"
-    )
+def build_message(article: dict, comment: str, hashtags: str) -> str:
+    lines = [f"📰 {article['title']}"]
+    if article.get("source"):
+        lines.append(f"（{article['source']}）")
+    lines.append("")
+    lines.append(comment)
+    lines.append("")
+    lines.append(article["link"])
+    lines.append("")
+    lines.append(hashtags)
+    return "\n".join(lines)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--test", action="store_true",
-                        help="画像生成のみ。LINEへの送信はスキップ")
-    parser.add_argument("--episode", type=int, default=None)
+                        help="取得と生成のみ。LINEへの送信はスキップ")
     args = parser.parse_args()
 
-    stories = json.loads((ROOT / "content" / "stories.json").read_text(encoding="utf-8"))
+    article = fetch_latest_unposted()
+    if article is None:
+        print("⚠️ 新しい未投稿ニュースが見つかりませんでした。")
+        return
 
-    if args.episode is not None:
-        episode_num = args.episode
-    else:
-        days = (date.today() - START_DATE).days
-        if days < 0:
-            print(f"開始日 {START_DATE} まで待機中です。")
-            return
-        episode_num = days + 1
+    print(f"📰 今日のニュース: {article['title']}")
 
-    idx   = (episode_num - 1) % len(stories)
-    story = stories[idx]
+    print("🤖 所感を生成中...")
+    comment, hashtags = generate_comment(article["title"], article.get("source", ""))
+    print(f"   所感: {comment}")
+    print(f"   ハッシュタグ: {hashtags}")
 
-    print(f"📅 今日のエピソード: #{episode_num:02d}「{story['title']}」({story['category']})")
-
-    # 4枚のパネル画像を生成
-    image_paths = compose(story, episode_num)
-    print(f"🖼  画像生成完了: {len(image_paths)}枚")
+    message = build_message(article, comment, hashtags)
 
     if args.test:
         print("✅ テストモード: 送信をスキップしました。")
+        print("--- 送信予定メッセージ ---")
+        print(message)
         return
 
-    # 4枚をimgbbにアップロード
-    import os
-    imgbb_key = os.environ["IMGBB_API_KEY"]
-    image_urls = []
-    for i, path in enumerate(image_paths, 1):
-        print(f"📤 imgbbにアップロード中... ({i}/{len(image_paths)})")
-        url = upload_to_imgbb(path, imgbb_key)
-        print(f"   URL: {url}")
-        image_urls.append(url)
-
-    caption = build_caption(story, episode_num)
-    send_line_panels(image_urls, caption)
+    send_line_text(message)
+    mark_posted(article["link"])
 
 
 if __name__ == "__main__":
