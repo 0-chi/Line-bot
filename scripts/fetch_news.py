@@ -10,7 +10,10 @@ ROOT = Path(__file__).parent.parent
 POSTED_LOG = ROOT / "content" / "posted_news.json"
 
 RSS_URL = "https://news.google.com/rss/search"
-QUERY = "不動産 OR 住宅市場 OR マンション市場"
+QUERY = (
+    "不動産 OR 住宅市場 OR マンション市場 OR 不動産トラブル OR 空き家問題 OR "
+    "住宅ローン OR 賃貸トラブル OR 不動産詐欺"
+)
 
 # 決算説明資料・適時開示など、事務的すぎて一般読者に刺さりにくい記事の特徴語。
 # 該当する記事は他に選べる記事がある限り後回しにする。
