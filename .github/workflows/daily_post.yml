@@ -1,23 +1,16 @@
-name: 不動産ニュース 毎日自動投稿
+name: 不動産ニュース 生成（LINE送信は無効）
 
+# 公式LINEへの自動送信は停止中。
+# このワークフローは手動実行のみで、記事の取得と所感の生成結果を
+# ログに出力するだけ（LINEへの送信は行わない）。
 on:
-  schedule:
-    # UTC 03:00 = JST 12:00 に毎日実行
-    - cron: '0 3 * * *'
   workflow_dispatch:
-    inputs:
-      test_mode:
-        description: '取得のみ（投稿しない）'
-        required: false
-        default: 'false'
-        type: choice
-        options: ['false', 'true']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  post:
+  generate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,24 +25,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run daily post
+      - name: Generate (no LINE send)
         env:
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_USER_ID:              ${{ secrets.LINE_USER_ID }}
-          ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          ARGS=""
-          if [ "${{ github.event.inputs.test_mode }}" = "true" ]; then
-            ARGS="$ARGS --test"
-          fi
-          python scripts/run_daily.py $ARGS
-
-      - name: Commit posted news log
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add content/posted_news.json
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: 投稿済みニュースログを更新"
-            git push
-          fi
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python scripts/run_daily.py --test
