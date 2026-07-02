@@ -10,7 +10,18 @@ ROOT = Path(__file__).parent.parent
 POSTED_LOG = ROOT / "content" / "posted_news.json"
 
 RSS_URL = "https://news.google.com/rss/search"
-QUERY = "不動産 OR 住宅市場 OR マンション市場"
+QUERY = (
+    "不動産 OR 住宅市場 OR マンション市場 OR 不動産トラブル OR 空き家問題 OR "
+    "住宅ローン OR 賃貸トラブル OR 不動産詐欺"
+)
+
+# 決算説明資料・適時開示など、事務的すぎて一般読者に刺さりにくい記事の特徴語。
+# 該当する記事は他に選べる記事がある限り後回しにする。
+_LOW_APPEAL_KEYWORDS = ("決算", "適時開示", "説明資料", "四半期報告", "有価証券報告書")
+
+
+def _is_low_appeal(title: str) -> bool:
+    return any(keyword in title for keyword in _LOW_APPEAL_KEYWORDS)
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -51,19 +62,26 @@ def fetch_latest_unposted() -> dict | None:
 
     posted = _load_posted()
 
+    fallback = None
     for item in root.findall("./channel/item"):
         link = item.findtext("link", "").strip()
         if not link or link in posted:
             continue
 
-        return {
-            "title": _strip_source(item.findtext("title", "").strip()),
+        title = _strip_source(item.findtext("title", "").strip())
+        article = {
+            "title": title,
             "link": link,
             "source": item.findtext("source", "").strip(),
             "pub_date": item.findtext("pubDate", "").strip(),
         }
 
-    return None
+        if not _is_low_appeal(title):
+            return article
+        if fallback is None:
+            fallback = article
+
+    return fallback
 
 
 def mark_posted(link: str) -> None:
